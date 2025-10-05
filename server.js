@@ -2,6 +2,7 @@ const express = require('express');
 const cors = require('cors');
 const bodyParser = require('body-parser');
 const { MongoClient, ObjectId } = require('mongodb');
+const path = require('path');
 require('dotenv').config();
 
 const app = express();
@@ -10,11 +11,13 @@ const app = express();
 app.use(cors());
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
-app.use(express.static('public'));
+
+// Servir archivos estáticos desde la carpeta public
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Variables de entorno
 const PORT = process.env.PORT || 3000;
-const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/exercisetracker';
+const MONGODB_URI = process.env.MONGODB_URI;
 
 // Variables globales para la conexión a la base de datos
 let db;
@@ -23,6 +26,11 @@ let client;
 // Conectar a MongoDB
 async function connectToDatabase() {
   try {
+    if (!MONGODB_URI) {
+      console.error('MONGODB_URI no está definida en las variables de entorno');
+      return;
+    }
+    
     client = new MongoClient(MONGODB_URI);
     await client.connect();
     db = client.db();
@@ -30,9 +38,9 @@ async function connectToDatabase() {
     // Crear índices únicos para username
     await db.collection('users').createIndex({ username: 1 }, { unique: true });
     
-    console.log('Conectado a MongoDB');
+    console.log('Conectado a MongoDB exitosamente');
   } catch (error) {
-    console.error('Error conectando a MongoDB:', error);
+    console.error('Error conectando a MongoDB:', error.message);
   }
 }
 
@@ -53,6 +61,10 @@ app.post('/api/users', async (req, res) => {
     
     if (!username) {
       return res.status(400).json({ error: 'Username is required' });
+    }
+    
+    if (!db) {
+      return res.status(500).json({ error: 'Database not connected' });
     }
     
     // Verificar si el usuario ya existe
@@ -83,13 +95,17 @@ app.post('/api/users', async (req, res) => {
         _id: existingUser._id.toString()
       });
     }
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 });
 
 // GET /api/users - Obtener todos los usuarios
 app.get('/api/users', async (req, res) => {
   try {
+    if (!db) {
+      return res.status(500).json({ error: 'Database not connected' });
+    }
+    
     const users = await db.collection('users').find({}).toArray();
     
     const formattedUsers = users.map(user => ({
@@ -99,7 +115,7 @@ app.get('/api/users', async (req, res) => {
     
     res.json(formattedUsers);
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 });
 
@@ -108,6 +124,10 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
   try {
     const { _id } = req.params;
     let { description, duration, date } = req.body;
+    
+    if (!db) {
+      return res.status(500).json({ error: 'Database not connected' });
+    }
     
     // Validaciones
     if (!description || !duration) {
@@ -162,7 +182,7 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
     });
     
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 });
 
@@ -171,6 +191,10 @@ app.get('/api/users/:_id/logs', async (req, res) => {
   try {
     const { _id } = req.params;
     const { from, to, limit } = req.query;
+    
+    if (!db) {
+      return res.status(500).json({ error: 'Database not connected' });
+    }
     
     // Buscar usuario
     let user;
@@ -239,18 +263,21 @@ app.get('/api/users/:_id/logs', async (req, res) => {
     });
     
   } catch (error) {
-    res.status(500).json({ error: 'Server error' });
+    res.status(500).json({ error: 'Server error: ' + error.message });
   }
 });
 
 // Ruta de prueba
 app.get('/api/test', (req, res) => {
-  res.json({ message: 'Exercise Tracker API is working!' });
+  res.json({ 
+    message: 'Exercise Tracker API is working!',
+    database: db ? 'Connected' : 'Not connected'
+  });
 });
 
-// Ruta principal
+// Ruta principal - servir el frontend
 app.get('/', (req, res) => {
-  res.sendFile(__dirname + '/public/index.html');
+  res.sendFile(path.join(__dirname, 'public', 'index.html'));
 });
 
 // Manejo de errores 404
@@ -261,6 +288,7 @@ app.use('*', (req, res) => {
 // Iniciar servidor
 app.listen(PORT, async () => {
   console.log(`Servidor ejecutándose en el puerto ${PORT}`);
+  console.log(`MongoDB URI: ${MONGODB_URI ? 'Configurada' : 'No configurada'}`);
   await connectToDatabase();
 });
 
